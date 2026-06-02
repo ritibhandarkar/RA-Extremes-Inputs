@@ -259,7 +259,8 @@ def calc_weighted_temp(ds):
     lrz_ids = np.asarray(county_temp["BA"])
     times = ds.time.values
 
-    unique_lrz = lrz["BA"].unique()
+    unique_lrz = list(zone_model_map.keys())  # canonical order
+
     lrz_temp = np.zeros((len(times), len(unique_lrz)))
 
     for j, lrz_id in enumerate(unique_lrz):
