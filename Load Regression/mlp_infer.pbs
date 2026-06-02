@@ -1,13 +1,15 @@
 #!/bin/bash
 #PBS -N mlp_infer
-#PBS -J 0-1
+#PBS -J 0-587
 #PBS -l select=1:ncpus=1:mem=1gb
 #PBS -l walltime=00:10:00
 #PBS -q main
 #PBS -A UMIC0126
-#PBS -o logs/mlp_cv.out
-#PBS -e logs/mlp_cv.err
+#PBS -o logs/mlp_infer.out
+#PBS -e logs/mlp_infer.err
 #PBS -j oe                    
+
+cd "/glade/u/home/rbhandarkar/Inputs/Load Regression"
 
 # RCP85: indices 0–278   (31 years × 9 members, 002–010)
 # RCP60: indices 279–588 (31 years × 10 members, 001–010)

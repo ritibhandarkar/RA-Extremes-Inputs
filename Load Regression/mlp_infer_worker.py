@@ -220,66 +220,57 @@ def calc_weighted_temp(ds):
 
     centroids = counties_lrz["centroid"]
 
-    # MESACLIP data is unstructured, so need to convert grid to points
+    
+    # MESACLIP is unstructured — build a point GeoDataFrame for the grid
     lon = ((ds["lon"] + 180) % 360) - 180
-    grid = pd.DataFrame({
-        "lat": ds["lat"].values,
-        "lon": lon.values
-    })
-
+    grid = pd.DataFrame({"lat": ds["lat"].values, "lon": lon.values})
     gdf_grid = gpd.GeoDataFrame(
         grid,
         geometry=gpd.points_from_xy(grid.lon, grid.lat),
-        crs="EPSG:4326"
+        crs="EPSG:4326",
     )
-    
-    # Map each county to point on the grid
+
+    centroids = counties_lrz["centroid"]
     county_points = gpd.GeoDataFrame(
         counties_lrz[["centroid", f"POPESTIMATE{POP_YEAR}", "BA"]],
         geometry=centroids,
-        crs="EPSG:4326"
+        crs="EPSG:4326",
     )
 
     county_to_grid = gpd.sjoin_nearest(
         county_points.to_crs("EPSG:5070"),
         gdf_grid.to_crs("EPSG:5070"),
-        how="left"
+        how="left",
     )
 
     grid_indices = county_to_grid["index_right"].values
-
-    # Map population data to temperature data
-    county_temp = ds["TREFHT"].isel(ncol=grid_indices).assign_coords(
-        pop=("ncol", np.asarray(county_to_grid[f"POPESTIMATE{POP_YEAR}"])),
-        BA=("ncol", np.asarray(county_to_grid["BA"]))
-    )
-
-    # Use np.asarray to ensure plain numpy arrays (avoids PyArrow indexing issues)
-    pop_weights = np.asarray(county_temp["pop"])
-    lrz_ids = np.asarray(county_temp["BA"])
+    pop_weights = np.asarray(county_to_grid[f"POPESTIMATE{POP_YEAR}"])
+    lrz_ids = np.asarray(county_to_grid["BA"])
     times = ds.time.values
 
-    unique_lrz = list(zone_model_map.keys())  # canonical order
+    # Chunk along time so dask parallelises reads across small time batches,
+    # then select only the needed ncol indices and load into memory
+    print("Reading county temperature data...")
+    data = ds["TREFHT"].chunk({"time": 43}).isel(ncol=grid_indices).compute().values  # (time, n_counties)
+    ds.close()
 
+    unique_lrz = lrz["BA"].unique()
     lrz_temp = np.zeros((len(times), len(unique_lrz)))
 
     for j, lrz_id in enumerate(unique_lrz):
         mask = lrz_ids == lrz_id
-        idx = np.where(mask)[0]
-        sub = county_temp.isel(ncol=idx)
-        w = xr.DataArray(pop_weights[mask], dims="ncol")
-        lrz_temp[:, j] = sub.weighted(w).mean("ncol")  # (time,)
+        w = pop_weights[mask]
+        if w.sum() == 0:
+            lrz_temp[:, j] = np.nan
+        else:
+            lrz_temp[:, j] = np.average(data[:, mask], weights=w, axis=1)
 
-
-    # Package as a clean DataFrame or xarray
     result = pd.DataFrame(
         lrz_temp,
-        index=pd.to_datetime(
-            [str(t) for t in times]
-        ),
-        columns=unique_lrz
+        index=pd.to_datetime([str(t) for t in times]),
+        columns=unique_lrz,
     )
-    result = result -273.15
+    result = result - 273.15
     result.index.name = "time"
 
     return result

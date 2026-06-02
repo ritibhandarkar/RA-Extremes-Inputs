@@ -31,20 +31,25 @@ from sklearn.preprocessing import StandardScaler
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 LRZ_IDS = ["MISO-0001", "MISO-0027", "MISO-0035", "MISO-0004", "MISO-0006", "MISO-8910"]
-YEARS   = [2014, 2015, 2016, 2017, 2018, 2019, 2021, 2022, 2023, 2024]
+YEARS   = [2014, 2015, 2016, 2017, 2018, 2019, 2021, 2022, 2023, 2024, 2025]
 SEED    = 42
-N_FOLDS = 8
+TEST_YEARS  = [2016, 2021, 2024]
+TRAIN_YEARS = sorted(set(YEARS) - set(TEST_YEARS))
+
+MODEL_FREQ = "6H"
 
 EXCLUDE_EXTREMES   = False
 EXTREME_PERCENTILE = 99
 
 HOLIDAYS       = ["memorial_day", "july_4th", "labor_day", "christmas", "new_years"]
-HOLIDAY_WINDOW = 2
+HOLIDAY_WINDOW = 0
 CDD_BASE       = 18.0  # °C
 
 GAM_COLS = [
     "cdd", "hdd",
-    "cdd_lag1", "hdd_lag1",
+    "cdd_lag6",  "hdd_lag6",
+    "cdd_lag12", "hdd_lag12",
+    "cdd_lag18", "hdd_lag18",
     "cdd_lag24", "hdd_lag24",
     "hour", "month", "day_of_week", "year",
     "memorial_day", "july_4th", "labor_day", "christmas", "new_years",
@@ -118,34 +123,29 @@ def get_holiday_dates(years):
 
 # ── Feature engineering ──────────────────────────────────────────────────────
 def build_features_raw(temp_series):
-    t   = temp_series
-    t_f = t * 9 / 5 + 32
+    t = temp_series
 
     X = pd.DataFrame(index=t.index)
-    X["cdd"]       = np.maximum(0.0, t - CDD_BASE)
-    X["hdd"]       = np.maximum(0.0, CDD_BASE - t)
-    X["cdd_lag1"]  = X["cdd"].shift(1)
-    X["hdd_lag1"]  = X["hdd"].shift(1)
-    X["cdd_lag24"] = X["cdd"].shift(24)
-    X["hdd_lag24"] = X["hdd"].shift(24)
+    X["cdd"] = np.maximum(0.0, t - CDD_BASE)
+    X["hdd"] = np.maximum(0.0, CDD_BASE - t)
 
     def create_lag(X, n):
-        X[f"cdd_lag{n}"] = X["cdd"].shift(n)
-        X[f"hdd_lag{n}"] = X["hdd"].shift(n)
+        shift = n // 6 if MODEL_FREQ == "6H" else n
+        X[f"cdd_lag{n}"] = X["cdd"].shift(shift)
+        X[f"hdd_lag{n}"] = X["hdd"].shift(shift)
         return X
-    
+
     X = create_lag(X, 6)
     X = create_lag(X, 12)
     X = create_lag(X, 18)
+    X = create_lag(X, 24)
 
+    # Zero out lag values that spuriously cross a gap in the time index
+    step = pd.Timedelta("6h") if MODEL_FREQ == "6H" else pd.Timedelta("1h")
+    gap_mask = X.index.to_series().diff() > step
+    for col in [c for c in X.columns if "lag" in c]:
+        X.loc[gap_mask, col] = np.nan
 
-    daily_avg_f = t_f.resample("D").mean().reindex(t.index, method="ffill")
-    bin_edges   = np.arange(
-        np.floor(daily_avg_f.min() / 10) * 10,
-        np.ceil(daily_avg_f.max()  / 10) * 10 + 10,
-        10,
-    )
-    X["temp_bin"]    = pd.cut(daily_avg_f, bins=bin_edges, labels=False).astype(float)
     X["hour"]        = t.index.hour
     X["day_of_week"] = t.index.day_of_week
     X["weekend"]     = (t.index.day_of_week > 4).astype(int)
@@ -196,8 +196,16 @@ def load_data(data_dir):
     load_wide = load_wide.drop(columns=["LRZ8_9", "MISO"])
     load_wide = load_wide.rename(columns=dict(zip(load_wide.columns, LRZ_IDS)))
 
-    temp_data.index = temp_data.index.tz_localize("UTC").tz_convert("Etc/GMT+5")
-    load_wide.index = pd.to_datetime(load_wide.index).tz_localize("Etc/GMT+5")
+    if MODEL_FREQ == "6H":
+        temp_data = temp_data.tz_localize("UTC").resample("6h").mean()
+        load_wide.index = pd.to_datetime(load_wide.index).tz_localize("Etc/GMT+5").tz_convert("UTC")
+        load_wide = load_wide.resample("6h").mean()
+
+        temp_data.index = temp_data.index.tz_convert("America/Indiana/Indianapolis")
+        load_wide.index  = load_wide.index.tz_convert("America/Indiana/Indianapolis")
+    else:
+        temp_data.index = temp_data.index.tz_localize("UTC").tz_convert("America/Indiana/Indianapolis")
+        load_wide.index = pd.to_datetime(load_wide.index).tz_localize("Etc/GMT+5").tz_convert("America/Indiana/Indianapolis")
 
     common_index = temp_data.index.intersection(load_wide.index)
     temp_data = temp_data.loc[common_index]
@@ -219,10 +227,9 @@ def main():
     zone = LRZ_IDS[zone_idx]
     print(f"[zone {zone_idx}] zone={zone}", flush=True)
 
-    # Training years (reproducible, same as other workers)
-    rng = np.random.default_rng(SEED)
-    train_years = sorted(rng.choice(YEARS, N_FOLDS, replace=False).tolist())
+    train_years = TRAIN_YEARS
     print(f"[zone {zone_idx}] train_years={train_years}", flush=True)
+    print(f"[zone {zone_idx}] test_years={TEST_YEARS}", flush=True)
 
     print(f"[zone {zone_idx}] Loading data ...", flush=True)
     temp_data, load_wide = load_data(args.data_dir)
