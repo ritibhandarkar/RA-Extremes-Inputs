@@ -1,0 +1,21 @@
+# Jupyter checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Archive folders
+archive/
+*archive*/
+**/archive*/
+
+# logs
+logs/
+*logs*/
+**/logs*/
+
+
+# Big profile folders
+Generator Data/Solar Profiles Clean/
+Generator Data/Wind Profiles Clean/
+Generator Data/Thermal FORs/
+Weather Data Processing/MESACLIP/hist_pop
+Weather Data Processing/MESACLIP/old_rcp85_02

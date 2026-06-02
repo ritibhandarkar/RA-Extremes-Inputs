@@ -1,0 +1,34 @@
+#!/bin/bash
+#PBS -N mlp_tuned
+#PBS -J 0-5                      
+#PBS -l select=1:ncpus=1:mem=4gb
+#PBS -l walltime=04:00:00
+#PBS -q main
+#PBS -A UMIC0126
+#PBS -o logs/mlp_tuned.out
+#PBS -e logs/mlp_tuned.err
+#PBS -j oe
+
+# ── Environment ───────────────────────────────────────────────────────────────
+module load conda
+conda activate assetra_gl
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+SCRIPT_DIR="/glade/u/home/rbhandarkar/Inputs/Load Regression"
+DATA_DIR="${SCRIPT_DIR}"
+OUT_DIR="${SCRIPT_DIR}/mlp_tuned_results"
+
+mkdir -p "${SCRIPT_DIR}/logs"
+mkdir -p "${OUT_DIR}"
+
+# ── Run worker ────────────────────────────────────────────────────────────────
+echo "Starting zone ${PBS_ARRAY_INDEX} on $(hostname) at $(date)"
+
+python "${SCRIPT_DIR}/mlp_tuned_worker.py" \
+    --task-id  "${PBS_ARRAY_INDEX}" \
+    --data-dir "${DATA_DIR}" \
+    --outdir   "${OUT_DIR}"
+
+EXIT_CODE=$?
+echo "Zone ${PBS_ARRAY_INDEX} finished at $(date) with exit code ${EXIT_CODE}"
+exit ${EXIT_CODE}

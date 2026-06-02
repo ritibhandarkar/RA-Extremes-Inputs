@@ -1,0 +1,35 @@
+#!/bin/bash
+#PBS -N resnet_cv
+#PBS -J 0-47
+#PBS -l select=1:ncpus=1:mem=1gb
+#PBS -l walltime=00:30:00
+#PBS -q main
+#PBS -A UMIC0126
+#PBS -o logs/resnet_cv.out
+#PBS -e logs/resnet_cv.err
+#PBS -j oe                    
+
+# ── Environment ───────────────────────────────────────────────────────────────
+cd "/glade/u/home/rbhandarkar/Inputs/Load Regression"
+module load conda
+conda activate assetra_gl
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+SCRIPT_DIR="/glade/u/home/rbhandarkar/Inputs/Load Regression"
+DATA_DIR="${SCRIPT_DIR}"
+OUT_DIR="${SCRIPT_DIR}/resnet_results"
+
+mkdir -p "${SCRIPT_DIR}/logs"
+mkdir -p "${OUT_DIR}"
+
+# ── Run worker ────────────────────────────────────────────────────────────────
+echo "Starting task ${PBS_ARRAY_INDEX} on $(hostname) at $(date)"
+
+python "${SCRIPT_DIR}/resnet_worker.py" \
+    --task-id  "${PBS_ARRAY_INDEX}" \
+    --data-dir "${DATA_DIR}" \
+    --outdir   "${OUT_DIR}"
+
+EXIT_CODE=$?
+echo "Task ${PBS_ARRAY_INDEX} finished at $(date) with exit code ${EXIT_CODE}"
+exit ${EXIT_CODE}
