@@ -2,7 +2,7 @@
 Generate MISO wind capacity factor profiles from CESM HR large ensemble data.
 Intended to be run as a SLURM job array — one job per year.
 
-Usage:  python generate_wind_profiles.py --year 2023
+Usage:  python generate_wind_profiles.py --year 2023 --ensemble "002" --rcp "RCP60"
 Output: Wind Profiles/{ensemble}_{rcp}/{profile_name}_{year}.csv
 """
 import argparse

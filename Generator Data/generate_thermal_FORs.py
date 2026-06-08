@@ -2,7 +2,7 @@
 Generate MISO thermal derate profiles from CESM HR large ensemble data.
 Intended to be run as a SLURM job array — one job per year.
 
-Usage:  python generate_thermal_derates.py --year 2023
+Usage:  python generate_thermal_FORs.py --year 2023 --ensemble 002 --rcp RCP_60
 Output:  Thermal FORs/{ensemble}_{rcp}/{profile_name}_{year}.csv
 """
 import argparse

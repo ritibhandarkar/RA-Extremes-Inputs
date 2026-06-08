@@ -197,13 +197,17 @@ def load_data(data_dir):
     load_wide = load_wide.rename(columns=dict(zip(load_wide.columns, LRZ_IDS)))
 
     if MODEL_FREQ == "6H":
-        temp_data = temp_data.tz_localize("UTC").resample("6h").mean()
+        # resample to 6-hourly, backwards looking to match CESM
+        # so 06:00 timestamp represents 0:00-06:00 average
+        temp_data = temp_data.tz_localize("UTC").resample("6h", closed="right", label="right").mean()
         load_wide.index = pd.to_datetime(load_wide.index).tz_localize("Etc/GMT+5").tz_convert("UTC")
-        load_wide = load_wide.resample("6h").mean()
+        load_wide = load_wide.resample("6h", closed="right", label="right").mean()
 
+        # convert to DST
         temp_data.index = temp_data.index.tz_convert("America/Indiana/Indianapolis")
         load_wide.index  = load_wide.index.tz_convert("America/Indiana/Indianapolis")
     else:
+        # Align timezones (with daylight savings)
         temp_data.index = temp_data.index.tz_localize("UTC").tz_convert("America/Indiana/Indianapolis")
         load_wide.index = pd.to_datetime(load_wide.index).tz_localize("Etc/GMT+5").tz_convert("America/Indiana/Indianapolis")
 

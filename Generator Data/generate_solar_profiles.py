@@ -2,7 +2,7 @@
 Generate MISO solar capacity factor profiles from CESM HR large ensemble data.
 Intended to be run as a SLURM job array — one job per year.
 
-Usage:  python generate_solar_profiles.py --year 2023 --ensemble "002"
+Usage:  python generate_solar_profiles.py --year 2023 --ensemble "002" --rcp "RCP60"
 Output: Solar Profiles/{ensemble}_{rcp}/{profile_name}_{year}.csv
 """
 import argparse
@@ -56,7 +56,7 @@ def trefht_path(year, ensemble, rcp, cesm_base): return _nc_path("TREFHT", "h2",
 # ── Physics ────────────────────────────────────────────────────────────────────
 def calculate_cfs(fsds, u10, trefht_c):
     """trefht_c must be in °C."""
-    c1, c2, c3, c4 = 4.3, 0.943, 0.028, 1.528
+    c1, c2, c3, c4 = 4.3, 0.943, 0.028, -1.528
     g        = -0.005
     t_stc    = 25    # °C
     rsds_stc = 1000  # W/m²
@@ -74,6 +74,7 @@ def load_solar_plants(pudl_csv: Path) -> pd.DataFrame:
         (pudl["BA"] == "MISO-0001"),
         (pudl["BA"] == "MISO-0027") & (pudl["state"] == "WI"),
         (pudl["BA"] == "MISO-0027") & (pudl["state"] == "MI"),
+        (pudl["BA"] == "MISO-0027") & (pudl["state"] == "IL"),
         (pudl["BA"] == "MISO-0035") & pudl["state"].isin(["IA", "MN", "IL"]),
         (pudl["BA"] == "MISO-0035"),
         (pudl["BA"] == "MISO-0004"),
@@ -82,7 +83,7 @@ def load_solar_plants(pudl_csv: Path) -> pd.DataFrame:
         (pudl["BA"] == "MISO-8910") & (pudl["state"].isin(["LA", "TX"])),
         (pudl["BA"] == "MISO-8910") & (pudl["state"] == "MS"),
     ]
-    choices = ["01", "02", "07", "03", "05", "04", "06", "08", "09", "10"]
+    choices = ["01", "02", "07", "04", "03", "05", "04", "06", "08", "09", "10"]
     pudl["LRZ"] = np.select(conditions, choices, default=None)
 
     solar = (pudl[pudl["fuel_type_code_pudl"] == "solar"]
