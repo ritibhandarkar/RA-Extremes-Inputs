@@ -55,7 +55,7 @@ def trefht_path(year, ensemble, rcp, cesm_base): return _nc_path("TREFHT", "h2",
 def calculate_fors(tech, trefht, for_table):
     trefht_rounded = np.clip(5 * np.round(trefht / 5), -15, 35).astype(int)
     mapping = for_table.set_index("Temperature")[tech]
-    return mapping[trefht_rounded].values
+    return mapping[trefht_rounded].values/100
 
 
 # ── PUDL loading ───────────────────────────────────────────────────────────────

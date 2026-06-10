@@ -2,7 +2,7 @@
 #PBS -N wind_profiles
 #PBS -J 0-588
 #PBS -l select=1:ncpus=1:mem=1GB
-#PBS -l walltime=01:00:00
+#PBS -l walltime=00:10:00
 #PBS -q main
 #PBS -A UMIC0126
 #PBS -j oe
