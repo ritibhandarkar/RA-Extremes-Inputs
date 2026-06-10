@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N mlp_infer
-#PBS -J 0-587
+#PBS -J 0-588
 #PBS -l select=1:ncpus=1:mem=1gb
 #PBS -l walltime=00:10:00
 #PBS -q main

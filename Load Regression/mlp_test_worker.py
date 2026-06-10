@@ -16,8 +16,6 @@ import sys
 import numpy as np
 import pandas as pd
 import joblib
-from sklearn.neural_network import MLPRegressor
-from sklearn.preprocessing import StandardScaler
 
 # ── Constants (must match mlp_worker.py exactly) ─────────────────────────────
 LRZ_IDS = ["MISO-0001", "MISO-0027", "MISO-0035", "MISO-0004", "MISO-0006", "MISO-8910"]
@@ -25,10 +23,6 @@ YEARS   = [2014, 2015, 2016, 2017, 2018, 2019, 2021, 2022, 2023, 2024, 2025]
 SEED        = 42
 TEST_YEARS  = [2016, 2021, 2024]
 TRAIN_YEARS = sorted(set(YEARS) - set(TEST_YEARS))
-
-# ── Toggle: exclude top-percentile load hours from training ───────────────────
-EXCLUDE_EXTREMES   = True
-EXTREME_PERCENTILE = 99
 
 MODEL_FREQ = "6H"
 
@@ -47,13 +41,6 @@ GAM_COLS = [
     "hour", "month", "day_of_week", "year",
     "memorial_day", "july_4th", "labor_day", "christmas", "new_years",
 ]
-
-# ── MLP hyperparameters ───────────────────────────────────────────────────────
-MLP_HIDDEN_LAYERS = (128, 64, 32)
-MLP_ACTIVATION    = "relu"
-MLP_MAX_ITER      = 500
-MLP_ALPHA         = 1e-4
-MLP_LR_INIT       = 1e-3
 
 
 # ── Feature encoding ──────────────────────────────────────────────────────────
@@ -76,6 +63,10 @@ def parse_args():
     parser.add_argument(
         "--outdir", default="mlp_test_results",
         help="Output directory for per-zone prediction parquets",
+    )
+    parser.add_argument(
+        "--model-dir", default="mlp_tuned_results",
+        help="Directory containing tuned mlp_tuned_zone*.joblib files",
     )
     return parser.parse_args()
 
@@ -175,9 +166,11 @@ def load_data(data_dir):
     load_wide = load_wide.rename(columns=dict(zip(load_wide.columns, LRZ_IDS)))
 
     if MODEL_FREQ == "6H":
-        temp_data = temp_data.tz_localize("UTC").resample("6h").mean()
+        # resample to 6-hourly, backwards looking to match CESM
+        # so 06:00 timestamp represents 0:00-06:00 average
+        temp_data = temp_data.tz_localize("UTC").resample("6h", closed="right", label="right").mean()
         load_wide.index = pd.to_datetime(load_wide.index).tz_localize("Etc/GMT+5").tz_convert("UTC")
-        load_wide = load_wide.resample("6h").mean()
+        load_wide = load_wide.resample("6h", closed="right", label="right").mean()
 
         temp_data.index = temp_data.index.tz_convert("America/Indiana/Indianapolis")
         load_wide.index  = load_wide.index.tz_convert("America/Indiana/Indianapolis")
@@ -216,65 +209,28 @@ def main():
     print(f"[task {args.task_id}] Loading data from {args.data_dir} ...", flush=True)
     temp_data, load_wide = load_data(args.data_dir)
 
-    train_mask = temp_data.index.year.isin(train_years)
-    test_mask  = temp_data.index.year.isin(test_years)
+    test_mask = temp_data.index.year.isin(test_years)
+    temp_test = temp_data.loc[test_mask]
+    load_test = load_wide.loc[test_mask]
 
-    temp_train = temp_data.loc[train_mask]
-    load_train = load_wide.loc[train_mask]
-    temp_test  = temp_data.loc[test_mask]
-    load_test  = load_wide.loc[test_mask]
-
-    # Build features on training data
-    X_tr_all = build_features_raw(temp_train[zone]).dropna()
-    y_tr_all = load_train[zone].loc[X_tr_all.index]
-
-    # Build features on test data (lags computed within test period only)
     X_te_all = build_features_raw(temp_test[zone]).dropna()
     y_te_all = load_test[zone].loc[X_te_all.index]
+    X_te_enc = encode_features(X_te_all).values
 
-    X_tr = X_tr_all[GAM_COLS]
-    X_te = X_te_all[GAM_COLS]
-    y_tr = y_tr_all
-    y_te = y_te_all
+    tuned_path = os.path.join(args.model_dir, f"mlp_tuned_zone{zone_idx}.joblib")
+    print(f"[task {args.task_id}] Loading tuned model from {tuned_path} ...", flush=True)
+    bundle = joblib.load(tuned_path)
+    mlp    = bundle["model"]
+    scaler = bundle["scaler"]
+    print(f"[task {args.task_id}] Best params: {bundle['best_params']}", flush=True)
 
-    if EXCLUDE_EXTREMES:
-        train_thresh = np.percentile(y_tr, EXTREME_PERCENTILE)
-        X_tr_fit = X_tr[y_tr <= train_thresh]
-        y_tr_fit = y_tr[y_tr <= train_thresh]
-        print(f"[task {args.task_id}] Extremes mode: "
-              f"train n={len(y_tr_fit)} (≤{train_thresh:.0f} MWh)", flush=True)
-    else:
-        X_tr_fit, y_tr_fit = X_tr, y_tr
-
-    X_tr_enc = encode_features(X_tr_fit).values
-    X_te_enc = encode_features(X_te).values
-
-    scaler = StandardScaler()
-    X_tr_scaled = scaler.fit_transform(X_tr_enc)
     X_te_scaled = scaler.transform(X_te_enc)
-
-    print(f"[task {args.task_id}] Fitting MLP {MLP_HIDDEN_LAYERS} ...", flush=True)
-    mlp = MLPRegressor(
-        hidden_layer_sizes=MLP_HIDDEN_LAYERS,
-        activation=MLP_ACTIVATION,
-        solver="adam",
-        alpha=MLP_ALPHA,
-        learning_rate_init=MLP_LR_INIT,
-        max_iter=MLP_MAX_ITER,
-        early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=20,
-        random_state=SEED,
-    )
-    mlp.fit(X_tr_scaled, y_tr_fit.values)
-    print(f"[task {args.task_id}] Converged after {mlp.n_iter_} iterations", flush=True)
-
     preds = mlp.predict(X_te_scaled)
     print(f"[task {args.task_id}] Done. n_test={len(preds)}", flush=True)
 
     out = pd.DataFrame(
-        {"actual": y_te.values, "predicted": preds},
-        index=y_te.index,
+        {"actual": y_te_all.values, "predicted": preds},
+        index=y_te_all.index,
     )
     out["zone"]       = zone
     out["zone_idx"]   = zone_idx
@@ -283,10 +239,6 @@ def main():
     out_path = os.path.join(args.outdir, f"mlp_test_preds_zone{zone_idx}.parquet")
     out.to_parquet(out_path)
     print(f"[task {args.task_id}] Saved → {out_path}", flush=True)
-
-    model_path = os.path.join(args.outdir, f"mlp_model_zone{zone_idx}.joblib")
-    joblib.dump({"model": mlp, "scaler": scaler}, model_path)
-    print(f"[task {args.task_id}] Model saved → {model_path}", flush=True)
 
 
 if __name__ == "__main__":

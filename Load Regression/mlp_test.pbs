@@ -17,6 +17,7 @@ conda activate assetra_gl
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="/glade/u/home/rbhandarkar/Inputs/Load Regression"
 DATA_DIR="${SCRIPT_DIR}"
+MODEL_DIR="${SCRIPT_DIR}/mlp_tuned_results"
 OUT_DIR="${SCRIPT_DIR}/mlp_test_results"
 
 mkdir -p "${SCRIPT_DIR}/logs"
@@ -28,6 +29,7 @@ echo "Starting task ${PBS_ARRAY_INDEX} on $(hostname) at $(date)"
 python "${SCRIPT_DIR}/mlp_test_worker.py" \
     --task-id  "${PBS_ARRAY_INDEX}" \
     --data-dir "${DATA_DIR}" \
+    --model-dir "${MODEL_DIR}" \
     --outdir   "${OUT_DIR}"
 
 EXIT_CODE=$?

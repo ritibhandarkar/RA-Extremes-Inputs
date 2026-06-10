@@ -137,6 +137,10 @@ def build_features_raw(temp_series):
     # Fix bug where if year of data is missing, it will use hours from the year - 1
     step = pd.Timedelta("6h") if MODEL_FREQ == "6H" else pd.Timedelta("1h")
     gap_mask = X.index.to_series().diff() > step
+    # Noleap model calendar skips Feb 29; the resulting 30h gap makes Mar 1 00:00 UTC
+    # appear to have invalid lags, but they are correct (positional lag = model 6H lag)
+    utc_idx = X.index.tz_convert("UTC")
+    gap_mask &= ~((utc_idx.month == 3) & (utc_idx.day == 1) & (utc_idx.hour == 0))
     for col in [c for c in X.columns if "lag" in c]:
         X.loc[gap_mask, col] = np.nan
 
@@ -171,11 +175,21 @@ def process_year(year, output_dir, ensemble, rcp, cesm_base):
     temp_data = calc_weighted_temp(trefht_ds)
     trefht_ds.close()
 
+    # Prepend prior year so lagged features are available at the start of target year
+    try:
+        trefht_prev = xr.open_dataset(trefht_path(year - 1, ensemble, rcp, cesm_base))
+        temp_prev = calc_weighted_temp(trefht_prev)
+        temp_combined = pd.concat([temp_prev, temp_data])
+    except FileNotFoundError:
+        temp_combined = temp_data
+
     # Convert to ET (with daylight savings)
-    temp_data = temp_data.tz_localize("UTC").tz_convert("America/Indiana/Indianapolis")
+    temp_combined = temp_combined.tz_localize("UTC").tz_convert("America/Indiana/Indianapolis")
 
     for z in ZONES:
-        profile = infer_load(temp_data[z], z)
+        profile = infer_load(temp_combined[z], z)
+        profile.index = profile.index.tz_convert("UTC")
+        profile = profile[profile.index.year == year]
         profile.to_csv(year_dir / f"{z}_load_{year}.csv")
 
     return year
@@ -280,7 +294,7 @@ def infer_load(temp_series, zone):
     # temp_series: tz-aware Series in °C at 6H resolution, ET with daylight savings
     X = build_features_raw(temp_series).dropna()
 
-    bundle = joblib.load(f"mlp_test_results/mlp_model_zone{zone_model_map[zone]}.joblib")
+    bundle = joblib.load(f"mlp_tuned_results/mlp_tuned_zone{zone_model_map[zone]}.joblib")
     mlp, scaler = bundle["model"], bundle["scaler"]
 
     X_scaled = scaler.transform(encode_features(X).values)
